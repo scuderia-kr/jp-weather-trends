@@ -1,0 +1,94 @@
+name: 주간 갱신 + Pages 배포
+
+# 매주 월요일 05:00 UTC = 한국시간 월요일 14:00
+on:
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch: {}          # 수동 실행 버튼
+
+permissions:
+  contents: write                # 갱신 데이터 커밋
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # 외부 패키지가 없어서 pip install 단계가 필요 없다
+
+      - name: 트렌드 수집
+        id: trends
+        continue-on-error: true    # Google이 클라우드 IP를 자주 막는다 → 실패해도 계속
+        run: python3 fetch_trends.py
+
+      - name: 계절 분석
+        run: python3 analyze_seasonality.py
+
+      - name: 날씨 갱신 + 대시보드 생성
+        env:
+          MUMUZ_PUBLIC: "1"        # 매출·광고비 제외하고 빌드
+        run: python3 fetch.py
+
+      - name: 매출·브랜드 유출 검사 (실패 시 배포 중단)
+        env:
+          # 저장소 Settings > Secrets 에 BRAND_NAME 을 넣어 두면 그 단어가 남아 있는지 검사한다.
+          # 검사어 자체를 소스에 적으면 그게 곧 유출이라 Secret 으로 뺀다. 없으면 이 검사는 건너뛴다.
+          BRAND_NAME: ${{ secrets.BRAND_NAME }}
+        run: |
+          fail=0
+          if grep -q '"ads": *{' dashboard.html; then
+            echo "::error::dashboard.html 에 매출 데이터가 포함되었습니다."; fail=1
+          fi
+          if git ls-files | grep -Ei 'paid|오가닉|brand\.txt'; then
+            echo "::error::커밋되면 안 되는 파일이 추적되고 있습니다."; fail=1
+          fi
+          if [ -n "$BRAND_NAME" ]; then
+            if grep -rIl --exclude-dir=.git --exclude-dir=.github -e "$BRAND_NAME" . ; then
+              echo "::error::브랜드명이 파일에 남아 있습니다."; fail=1
+            else
+              echo "브랜드명 검사 통과"
+            fi
+          else
+            echo "::notice::BRAND_NAME Secret 이 없어 브랜드명 검사를 건너뜁니다."
+          fi
+          [ "$fail" = "0" ] && echo "검사 통과 — 매출·브랜드 노출 없음" || exit 1
+
+      - name: 변경분 커밋
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A data dashboard.html
+          git diff --staged --quiet || git commit -m "주간 갱신 $(date -u '+%Y-%m-%d')"
+          git push
+
+      - name: 트렌드 수집 실패 알림
+        if: steps.trends.outcome == 'failure'
+        run: echo "::warning::트렌드 수집 실패(429 가능). 날씨·계절 분석은 갱신됨. 대시보드의 CSV 가져오기로 보완하세요."
+
+      - name: 배포 파일 준비
+        run: |
+          mkdir -p _site && cp dashboard.html _site/index.html
+          cp -r data _site/data
+          rm -rf _site/data/_backup _site/data/_upload.csv
+
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: _site }
+
+  deploy:
+    needs: update
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

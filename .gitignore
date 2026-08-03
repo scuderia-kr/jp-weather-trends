@@ -1,0 +1,17 @@
+# 매출·광고비 원본은 절대 올리지 않는다.
+# 공개 저장소에 한 번 커밋되면 이후 지워도 커밋 기록에 남는다.
+일본_Paid,오가닉 데이터.csv
+*Paid*.csv
+*오가닉*.csv
+
+# 브랜드명 — 소스에 남기지 않는다
+brand.txt
+
+# 작업 중 생기는 것
+data/_backup/
+data/_upload.csv
+data/_anom.json
+logs/
+__pycache__/
+*.pyc
+.DS_Store
