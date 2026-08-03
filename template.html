@@ -327,6 +327,39 @@ function niceTicks(min, max, count){
   return ticks;
 }
 
+
+/* 툴팁 배치 — 모바일에서 잘리지 않게.
+   차트가 가로 스크롤되는 컨테이너 안이라, 스크롤 위치를 빼고 '보이는 영역' 기준으로
+   자리를 잡은 뒤 다시 컨테이너 좌표로 되돌려야 한다. 폭도 화면 안으로 제한한다. */
+
+/* 마우스와 터치를 같이 받는다. 모바일에서는 touchmove 로 손가락을 끌며 값을 읽는다. */
+function onLeaveBoth(el, fn){
+  el.addEventListener("mouseleave", fn);
+  el.addEventListener("touchend", fn, {passive:true});
+  el.addEventListener("touchcancel", fn, {passive:true});
+}
+function bindMove(el, fn){
+  el.addEventListener("mousemove", fn);
+  const t2 = e => { const t = e.touches && e.touches[0]; if (t) fn({clientX:t.clientX, clientY:t.clientY}); };
+  el.addEventListener("touchstart", t2, {passive:true});
+  el.addEventListener("touchmove", t2, {passive:true});
+}
+
+function placeTip(box, tip, xView, top){
+  const svg = box.querySelector("svg");
+  const sw = svg ? svg.getBoundingClientRect().width : box.clientWidth;
+  const px = xView / W * sw;                 // viewBox 좌표 → 실제 렌더 좌표
+  const vis = box.clientWidth;               // 화면에 보이는 폭
+  tip.style.maxWidth = Math.max(150, vis - 16) + "px";
+  const tw = tip.offsetWidth;
+  const rel = px - box.scrollLeft;           // 보이는 영역 안에서의 위치
+  let left = rel + 14;
+  if (left + tw > vis - 4) left = rel - tw - 14;
+  left = Math.max(4, Math.min(left, vis - tw - 4));
+  tip.style.left = (left + box.scrollLeft) + "px";
+  tip.style.top = (top == null ? 8 : top) + "px";
+}
+
 const SVGNS = "http://www.w3.org/2000/svg";
 function el(tag, attrs, parent){
   const n = document.createElementNS(SVGNS, tag);
@@ -584,7 +617,7 @@ function drawLines(mode, range){
 /* shared hover handler: maps pointer x → data index */
 function hover(svg, box, tip, onMove, onLeave, rng){
   const i0 = rng ? rng.i0 : 0, i1 = rng ? rng.i1 : N - 1;
-  svg.addEventListener("mousemove", e => {
+  bindMove(svg, e => {
     const r = svg.getBoundingClientRect();
     const px = (e.clientX - r.left) / r.width * W;
     let i = i0 + Math.round((px - PL) / (IW || 1) * (i1 - i0));
@@ -592,13 +625,10 @@ function hover(svg, box, tip, onMove, onLeave, rng){
     const res = onMove(i);
     tip.innerHTML = res.html;
     tip.style.opacity = 1;
-    const bw = box.clientWidth, tw = tip.offsetWidth;
-    let left = res.x * bw + 14;
-    if (left + tw > bw) left = res.x * bw - tw - 14;
-    tip.style.left = Math.max(0, left) + "px";
+    placeTip(box, tip, res.x * W);
     tip.style.top = (res.y !== undefined ? res.y : 10) + "px";
   });
-  svg.addEventListener("mouseleave", () => { tip.style.opacity = 0; onLeave && onLeave(); });
+  onLeaveBoth(svg, () => { tip.style.opacity = 0; onLeave && onLeave(); });
 }
 
 /* ---------- chart 2: diff bars ---------- */
@@ -897,7 +927,7 @@ function renderTrends(){
 
     const cross = el("line", {y1:PT5, y2:PT5+IH5, stroke:css("--muted"), "stroke-width":1, opacity:0}, svg);
     const dots = KW.map(k => el("circle", {r:3.5, fill:col(k), opacity:0}, svg));
-    svg.addEventListener("mousemove", e => {
+    bindMove(svg, e => {
       const r = svg.getBoundingClientRect();
       const px = (e.clientX - r.left) / r.width * W;
       let i = i0 + Math.round((px - PL) / (IW || 1) * span);
@@ -914,12 +944,9 @@ function renderTrends(){
       });
       const tip = document.getElementById("t5");
       tip.innerHTML = html; tip.style.opacity = 1;
-      const bw = box.clientWidth, tw = tip.offsetWidth;
-      let left = X(i)/W * bw + 14;
-      if (left + tw > bw) left = X(i)/W * bw - tw - 14;
-      tip.style.left = Math.max(0, left) + "px"; tip.style.top = "10px";
+      placeTip(box, tip, X(i));
     });
-    svg.addEventListener("mouseleave", () => {
+    onLeaveBoth(svg, () => {
       document.getElementById("t5").style.opacity = 0;
       cross.setAttribute("opacity", 0); dots.forEach(d => d.setAttribute("opacity", 0));
     });
@@ -1190,7 +1217,7 @@ function renderVerdict(){
     const cross = el("line", {y1:PTa, y2:PTa+IHa, stroke:css("--muted"), "stroke-width":1, opacity:0}, svg);
     const dA = el("circle", {r:3.6, fill:o.a.color, opacity:0}, svg);
     const dB = el("circle", {r:3.6, fill:o.b.color, opacity:0}, svg);
-    svg.addEventListener("mousemove", e => {
+    bindMove(svg, e => {
       const r = svg.getBoundingClientRect();
       const px = (e.clientX - r.left) / r.width * W;
       let i = Math.round((px - PLa) / (IWa || 1) * (M - 1));
@@ -1204,12 +1231,9 @@ function renderVerdict(){
         + `<br><span style="color:${o.a.color}">●</span> ${o.a.name} ${va == null || Number.isNaN(va) ? "–" : o.a.fmt(va)}`
         + `<br><span style="color:${o.b.color}">●</span> ${o.b.name} ${vb == null || Number.isNaN(vb) ? "–" : o.b.fmt(vb)}`;
       tip.style.opacity = 1;
-      const bw = box.clientWidth, tw = tip.offsetWidth;
-      let left = X(i)/W * bw + 14;
-      if (left + tw > bw) left = X(i)/W * bw - tw - 14;
-      tip.style.left = Math.max(0, left) + "px"; tip.style.top = "6px";
+      placeTip(box, tip, X(i), 6);
     });
-    svg.addEventListener("mouseleave", () => {
+    onLeaveBoth(svg, () => {
       document.getElementById(tipId).style.opacity = 0;
       cross.setAttribute("opacity", 0); dA.setAttribute("opacity", 0); dB.setAttribute("opacity", 0);
     });
