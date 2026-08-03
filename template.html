@@ -148,7 +148,9 @@
       <label id="lblImport" class="fakebtn">CSV 가져오기
         <input type="file" id="fileImport" accept=".csv" hidden>
       </label>
+      <button id="btnPublish" hidden>GitHub에 반영 ↑</button>
       <button id="btnDownload" class="primary" hidden>이 페이지 내려받기 ↓</button>
+      <a id="lnkActions" class="fakebtn" href="#" target="_blank" rel="noopener" hidden>GitHub에서 날씨 갱신 실행 ↗</a>
       <span id="ctlstatus"></span>
     </div>
     <div id="ctlresult"></div>
@@ -1649,7 +1651,9 @@ renderVerdict();
 
   let poller = null;
   function busy(on, msg){
-    [bUp, bSave, bRev].forEach(b => b.disabled = on || b.dataset.off === "1");
+    [bUp, bSave, bRev, document.getElementById("btnPublish")].forEach(b => {
+      if (b) b.disabled = on || b.dataset.off === "1";
+    });
     if (on){
       st.innerHTML = `<span class="good">${msg}</span>`;
       // 1~2분 걸릴 수 있어 멈춘 것처럼 보인다 → 서버 진행상황을 실시간으로 비춘다
@@ -1714,6 +1718,14 @@ renderVerdict();
   function staticMode(){
     [bUp, bSave, bRev].forEach(b => b.hidden = true);
     document.getElementById("lblImport").hidden = true;
+    // 배포본에서도 '날씨 갱신'은 GitHub Actions 로 돌릴 수 있다(저장소 권한 필요)
+    const m = location.hostname.match(/^([^.]+)\.github\.io$/);
+    if (m){
+      const repo = location.pathname.split("/").filter(Boolean)[0] || "";
+      const a = document.getElementById("lnkActions");
+      a.href = `https://github.com/${m[1]}/${repo}/actions/workflows/update.yml`;
+      a.hidden = false;
+    }
     st.innerHTML = `<b>열람용으로 배포된 페이지입니다.</b> 날씨·검색 트렌드는 매주 자동 갱신됩니다. `
       + `<b>[이 페이지 내려받기]</b> 로 파일을 받으면 내 PC에서 열 수 있고, `
       + `아래 <b>비교 2</b>의 <b>[매출 CSV 불러오기]</b> 로 성과 파일을 얹어 볼 수 있습니다. `
@@ -1773,6 +1785,26 @@ renderVerdict();
         return fetch("/api/status").then(r => r.json()).then(showStatus);
       })
       .catch(e => { busy(false); fileEl.value = ""; res.innerHTML = `<div class="box warn">업로드 실패: ${e}</div>`; });
+  });
+
+  // 로컬에서 받은 데이터를 공개 빌드로 바꿔 GitHub 에 올린다 (터미널 불필요)
+  const bPub = document.getElementById("btnPublish");
+  bPub.hidden = false;
+  bPub.addEventListener("click", () => {
+    busy(true, "GitHub에 반영 중… 공개용으로 다시 빌드하고 유출 검사 후 push 합니다.");
+    post("/api/publish").then(d => {
+      busy(false);
+      if (!d.ok){
+        res.innerHTML = `<div class="box"><b class="warn">${d.error}</b>`
+          + (d.problems ? `<ul style="margin:8px 0 0">${d.problems.map(x=>`<li>${x}</li>`).join("")}</ul>` : "")
+          + (d.log ? `<pre style="white-space:pre-wrap;margin:8px 0 0;font-size:11px">${d.log}</pre>` : "")
+          + `</div>`;
+        return;
+      }
+      res.innerHTML = `<div class="box"><b class="good">${d.message}</b>`
+        + (d.page ? `<br><a href="${d.page}" target="_blank" rel="noopener">${d.page}</a>` : "")
+        + `<br><span style="color:var(--muted)">매출 데이터는 제외하고 브랜드명은 익명화해서 올렸습니다.</span></div>`;
+    }).catch(e => { busy(false); res.innerHTML = `<div class="box warn">요청 실패: ${e}</div>`; });
   });
 
   bRev.addEventListener("click", () => {

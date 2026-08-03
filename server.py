@@ -17,7 +17,7 @@
 사용:  python3 server.py     → http://localhost:8765 접속
 """
 
-import csv, http.server, json, os, shutil, socketserver, subprocess, sys, threading, urllib.parse
+import csv, http.server, json, os, re, shutil, socketserver, subprocess, sys, threading, urllib.parse
 from datetime import date, datetime, timedelta
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -59,6 +59,21 @@ def run(script, timeout=900):
         return p.returncode == 0, "\n".join(lines).strip()
     except Exception as e:
         return False, "\n".join(lines) + "\n%s 실행 실패: %s" % (script, e)
+
+
+def _brand_name():
+    p = os.path.join(HERE, "brand.txt")
+    if os.path.exists(p):
+        with open(p, encoding="utf-8") as f:
+            return f.read().strip()
+    return os.environ.get("BRAND", "").strip()
+
+
+def _restore_local():
+    """공개 빌드로 덮어쓴 dashboard.html 을 매출 포함 로컬본으로 되돌린다."""
+    env = dict(os.environ); env.pop("MUMUZ_PUBLIC", None)
+    subprocess.run([PY, os.path.join(HERE, "fetch.py")], cwd=HERE,
+                   capture_output=True, env=env, timeout=600)
 
 
 def read_weekly(path):
@@ -166,6 +181,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return self._update()
             if path == "/api/save":
                 return self._save()
+            if path == "/api/publish":
+                return self._publish()
             if path == "/api/import":
                 return self._import()
             if path == "/api/revert":
@@ -204,6 +221,74 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             "log": out,
             "message": "받아왔습니다. 내용을 확인하고 [저장]을 누르면 확정됩니다.",
         })
+
+    def _publish(self):
+        """공개 빌드로 다시 만들어 검사한 뒤 GitHub 에 push 한다.
+
+        순서가 안전의 핵심이다. 반드시 공개 빌드(매출 제외 + 익명화)로 바꾼 뒤
+        검사에 통과해야만 커밋한다. push 가 끝나면 로컬 대시보드는 매출 포함본으로
+        되돌려 놓는다 — 화면에서 매출 비교가 사라지지 않게.
+        """
+        _prog.update(running=True, step="", lines=[], started=datetime.now())
+        try:
+            _mark("공개용으로 다시 빌드 (매출 제외 · 브랜드 익명화)")
+            env = dict(os.environ, MUMUZ_PUBLIC="1")
+            p = subprocess.run([PY, "-u", os.path.join(HERE, "fetch.py")], cwd=HERE,
+                               capture_output=True, text=True, timeout=600, env=env)
+            if p.returncode != 0:
+                return self._json({"ok": False, "error": "공개 빌드 실패",
+                                   "log": (p.stdout or "") + (p.stderr or "")}, 500)
+
+            _mark("유출 검사")
+            dash = os.path.join(HERE, "dashboard.html")
+            html = open(dash, encoding="utf-8").read()
+            problems = []
+            if '"ads": {' in html:
+                problems.append("dashboard.html 에 매출 데이터가 있습니다")
+            brand = _brand_name()
+            if brand and brand in html:
+                problems.append("dashboard.html 에 브랜드명이 남아 있습니다")
+            tracked = subprocess.run(["git", "ls-files"], cwd=HERE,
+                                     capture_output=True, text=True).stdout.split("\n")
+            for t in tracked:
+                low = t.lower()
+                if "paid" in low or "오가닉" in t or t.strip() == "brand.txt":
+                    problems.append("추적되면 안 되는 파일: " + t)
+            if problems:
+                _restore_local()
+                return self._json({"ok": False, "error": "유출 검사에 걸려 중단했습니다.",
+                                   "problems": problems}, 400)
+
+            _mark("GitHub 에 커밋 · push")
+            subprocess.run(["git", "add", "-A"], cwd=HERE, capture_output=True)
+            has = subprocess.run(["git", "diff", "--staged", "--quiet"], cwd=HERE).returncode != 0
+            pushed = False
+            if has:
+                msg = "데이터 갱신 " + date.today().isoformat() + " [skip ci]"
+                subprocess.run(["git", "-c", "user.name=dashboard",
+                                "-c", "user.email=dashboard@local",
+                                "commit", "-q", "-m", msg], cwd=HERE, capture_output=True)
+                pr = subprocess.run(["git", "push", "origin", "HEAD"], cwd=HERE,
+                                    capture_output=True, text=True, timeout=180)
+                if pr.returncode != 0:
+                    _restore_local()
+                    return self._json({"ok": False, "error": "push 실패",
+                                       "log": (pr.stdout or "") + (pr.stderr or "")}, 500)
+                pushed = True
+
+            url = subprocess.run(["git", "remote", "get-url", "origin"], cwd=HERE,
+                                 capture_output=True, text=True).stdout.strip()
+            m = re.search(r"github\.com[:/]([^/]+)/([^/.]+)", url)
+            page = "https://%s.github.io/%s/" % (m.group(1), m.group(2)) if m else ""
+            _restore_local()
+            return self._json({"ok": True, "pushed": pushed, "page": page,
+                               "message": ("GitHub 에 반영했습니다. 1~2분 뒤 배포 페이지에 나타납니다."
+                                           if pushed else "바뀐 내용이 없어 push 하지 않았습니다.")})
+        except Exception as e:
+            _restore_local()
+            return self._json({"ok": False, "error": str(e)}, 500)
+        finally:
+            _prog["running"] = False
 
     def _import(self):
         """브라우저가 올린 Google 트렌드 CSV 를 그대로 받아 반영한다.
