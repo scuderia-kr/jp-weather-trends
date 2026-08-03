@@ -346,18 +346,33 @@ function bindMove(el, fn){
 }
 
 function placeTip(box, tip, xView, top){
+  /* 툴팁을 스크롤 컨테이너 좌표로 두면, 터치로 드래그할 때 컨테이너가 함께 스크롤되면서
+     툴팁이 화면 밖으로 밀려 잘린다. position:fixed 로 화면 좌표에 직접 놓아
+     스크롤·overflow 클리핑의 영향을 아예 받지 않게 한다. */
   const svg = box.querySelector("svg");
-  const sw = svg ? svg.getBoundingClientRect().width : box.clientWidth;
-  const px = xView / W * sw;                 // viewBox 좌표 → 실제 렌더 좌표
-  const vis = box.clientWidth;               // 화면에 보이는 폭
-  tip.style.maxWidth = Math.max(150, vis - 16) + "px";
-  const tw = tip.offsetWidth;
-  const rel = px - box.scrollLeft;           // 보이는 영역 안에서의 위치
-  let left = rel + 14;
-  if (left + tw > vis - 4) left = rel - tw - 14;
-  left = Math.max(4, Math.min(left, vis - tw - 4));
-  tip.style.left = (left + box.scrollLeft) + "px";
-  tip.style.top = (top == null ? 8 : top) + "px";
+  if (!svg) return;
+  const sr = svg.getBoundingClientRect();
+  const br = box.getBoundingClientRect();
+  const vw = document.documentElement.clientWidth;
+
+  tip.style.position = "fixed";
+  tip.style.maxWidth = Math.max(150, Math.min(br.width, vw) - 16) + "px";
+  const tw = tip.offsetWidth, th = tip.offsetHeight;
+
+  const xc = sr.left + xView / W * sr.width;     // 화면상의 기준점
+  let left = xc + 14;
+  if (left + tw > br.right - 4) left = xc - tw - 14;
+  const lo = Math.max(4, br.left + 4), hi = Math.min(vw, br.right) - tw - 4;
+  tip.style.left = Math.max(lo, Math.min(left, Math.max(lo, hi))) + "px";
+
+  let t = br.top + (top == null ? 8 : top);
+  if (t + th > br.bottom - 4) t = Math.max(br.top + 4, br.bottom - th - 4);
+  tip.style.top = t + "px";
+}
+
+/* 차트를 스크롤하면 툴팁 위치가 어긋나므로 즉시 숨긴다 */
+function hideTipOnScroll(box, tip){
+  box.addEventListener("scroll", () => { tip.style.opacity = 0; }, {passive:true});
 }
 
 const SVGNS = "http://www.w3.org/2000/svg";
@@ -617,6 +632,7 @@ function drawLines(mode, range){
 /* shared hover handler: maps pointer x → data index */
 function hover(svg, box, tip, onMove, onLeave, rng){
   const i0 = rng ? rng.i0 : 0, i1 = rng ? rng.i1 : N - 1;
+  hideTipOnScroll(box, tip);
   bindMove(svg, e => {
     const r = svg.getBoundingClientRect();
     const px = (e.clientX - r.left) / r.width * W;
@@ -925,7 +941,8 @@ function renderTrends(){
       el("path", {d, fill:"none", stroke:col(k), "stroke-width":1.8, "stroke-linejoin":"round"}, svg);
     });
 
-    const cross = el("line", {y1:PT5, y2:PT5+IH5, stroke:css("--muted"), "stroke-width":1, opacity:0}, svg);
+    hideTipOnScroll(box, document.getElementById("t5"));
+  const cross = el("line", {y1:PT5, y2:PT5+IH5, stroke:css("--muted"), "stroke-width":1, opacity:0}, svg);
     const dots = KW.map(k => el("circle", {r:3.5, fill:col(k), opacity:0}, svg));
     bindMove(svg, e => {
       const r = svg.getBoundingClientRect();
@@ -1214,6 +1231,7 @@ function renderVerdict(){
     const lg = el("text", {x:PLa, y:PTa-5, "font-size":10, fill:css("--muted")}, svg);
     lg.textContent = `실선=${o.a.name}(좌)   ${o.b.dash ? "점선" : "선"}=${o.b.name}(우)`;
 
+    hideTipOnScroll(box, document.getElementById(tipId));
     const cross = el("line", {y1:PTa, y2:PTa+IHa, stroke:css("--muted"), "stroke-width":1, opacity:0}, svg);
     const dA = el("circle", {r:3.6, fill:o.a.color, opacity:0}, svg);
     const dB = el("circle", {r:3.6, fill:o.b.color, opacity:0}, svg);
