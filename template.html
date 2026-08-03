@@ -150,7 +150,8 @@
       </label>
       <button id="btnPublish" hidden>GitHub에 반영 ↑</button>
       <button id="btnDownload" class="primary" hidden>이 페이지 내려받기 ↓</button>
-      <a id="lnkActions" class="fakebtn" href="#" target="_blank" rel="noopener" hidden>GitHub에서 날씨 갱신 실행 ↗</a>
+      <a id="lnkActions" class="fakebtn" href="#" target="_blank" rel="noopener" hidden
+         title="Actions 페이지에서 우측 상단 [Run workflow] 버튼(창이 좁으면 ··· 메뉴 안)을 누르세요">즉시 갱신하기 ↗</a>
       <span id="ctlstatus"></span>
     </div>
     <div id="ctlresult"></div>
@@ -1726,10 +1727,12 @@ renderVerdict();
       a.href = `https://github.com/${m[1]}/${repo}/actions/workflows/update.yml`;
       a.hidden = false;
     }
-    st.innerHTML = `<b>열람용으로 배포된 페이지입니다.</b> 날씨·검색 트렌드는 매주 자동 갱신됩니다. `
+    st.innerHTML = `<b>열람용으로 배포된 페이지입니다.</b> 날씨는 <b>매주 월요일 오후 2시에 자동 갱신</b>되므로 `
+      + `평소엔 아무것도 누르지 않으셔도 됩니다. `
       + `<b>[이 페이지 내려받기]</b> 로 파일을 받으면 내 PC에서 열 수 있고, `
       + `아래 <b>비교 2</b>의 <b>[매출 CSV 불러오기]</b> 로 성과 파일을 얹어 볼 수 있습니다. `
-      + `<span style="color:var(--muted)">매출 파일은 브라우저 안에서만 처리되며 전송되지 않습니다.</span>`;
+      + `<span style="color:var(--muted)">매출 파일은 브라우저 안에서만 처리되며 전송되지 않습니다. `
+      + `[즉시 갱신하기]는 저장소 소유자만 쓸 수 있고, 열린 화면 우측 상단 <b>Run workflow</b> 버튼(창이 좁으면 <b>···</b> 메뉴 안)을 누르면 됩니다.</span>`;
   }
   fetch("/api/status", {cache:"no-store"})
     .then(r => r.ok ? r.json() : Promise.reject())
