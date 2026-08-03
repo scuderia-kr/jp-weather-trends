@@ -259,28 +259,38 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return self._json({"ok": False, "error": "유출 검사에 걸려 중단했습니다.",
                                    "problems": problems}, 400)
 
-            _mark("원격 변경분 받아오기")
-            subprocess.run(["git", "fetch", "-q", "origin"], cwd=HERE, capture_output=True, timeout=180)
-            # Actions 가 만든 커밋이 앞서 있을 수 있다. 생성물이 충돌하면 방금 만든
-            # 로컬본을 채택한다(리베이스 중에는 replay 되는 쪽이 'theirs').
-            rb = subprocess.run(["git", "rebase", "-X", "theirs", "origin/main"],
-                                cwd=HERE, capture_output=True, text=True, timeout=180)
-            if rb.returncode != 0:
-                subprocess.run(["git", "rebase", "--abort"], cwd=HERE, capture_output=True)
-                _restore_local()
-                return self._json({"ok": False, "error": "원격과 병합하지 못했습니다. 터미널에서 확인이 필요합니다.",
-                                   "log": (rb.stdout or "") + (rb.stderr or "")}, 409)
-
-            _mark("GitHub 에 커밋 · push")
+            # 순서가 중요하다: 먼저 커밋해서 작업트리를 깨끗이 만든 뒤에야 리베이스가 된다.
+            _mark("커밋")
             subprocess.run(["git", "add", "-A"], cwd=HERE, capture_output=True)
             has = subprocess.run(["git", "diff", "--staged", "--quiet"], cwd=HERE).returncode != 0
-            pushed = False
             if has:
                 msg = "데이터 갱신 " + date.today().isoformat() + " [skip ci]"
                 subprocess.run(["git", "-c", "user.name=dashboard",
                                 "-c", "user.email=dashboard@local",
                                 "commit", "-q", "-m", msg], cwd=HERE, capture_output=True)
-                pr = subprocess.run(["git", "push", "origin", "HEAD"], cwd=HERE,
+
+            _mark("원격 변경분 병합")
+            subprocess.run(["git", "fetch", "-q", "origin"], cwd=HERE, capture_output=True, timeout=180)
+            behind = subprocess.run(["git", "rev-list", "--count", "HEAD..origin/main"],
+                                    cwd=HERE, capture_output=True, text=True).stdout.strip()
+            if behind and behind != "0":
+                # Actions 가 만든 커밋이 앞서 있다. 생성물이 충돌하면 방금 만든
+                # 로컬본을 채택한다(리베이스 중에는 replay 되는 쪽이 'theirs').
+                rb = subprocess.run(["git", "rebase", "-X", "theirs", "origin/main"],
+                                    cwd=HERE, capture_output=True, text=True, timeout=180)
+                if rb.returncode != 0:
+                    subprocess.run(["git", "rebase", "--abort"], cwd=HERE, capture_output=True)
+                    _restore_local()
+                    return self._json({"ok": False,
+                                       "error": "원격과 병합하지 못했습니다. 터미널에서 확인이 필요합니다.",
+                                       "log": (rb.stdout or "") + (rb.stderr or "")}, 409)
+
+            _mark("push")
+            pushed = False
+            ahead = subprocess.run(["git", "rev-list", "--count", "origin/main..HEAD"],
+                                   cwd=HERE, capture_output=True, text=True).stdout.strip()
+            if ahead and ahead != "0":
+                pr = subprocess.run(["git", "push", "origin", "HEAD:main"], cwd=HERE,
                                     capture_output=True, text=True, timeout=180)
                 if pr.returncode != 0:
                     _restore_local()
