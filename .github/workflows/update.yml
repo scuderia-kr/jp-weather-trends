@@ -65,6 +65,9 @@ jobs:
           [ "$fail" = "0" ] && echo "검사 통과 — 매출·브랜드 노출 없음" || exit 1
 
       - name: 변경분 커밋
+        # push 로 트리거된 경우엔 커밋하지 않는다.
+        # 방금 사람이 올린 것을 재빌드해 되올리면 로컬과 계속 어긋난다.
+        if: github.event_name != 'push'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

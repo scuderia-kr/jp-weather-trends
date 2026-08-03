@@ -259,6 +259,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return self._json({"ok": False, "error": "유출 검사에 걸려 중단했습니다.",
                                    "problems": problems}, 400)
 
+            _mark("원격 변경분 받아오기")
+            subprocess.run(["git", "fetch", "-q", "origin"], cwd=HERE, capture_output=True, timeout=180)
+            # Actions 가 만든 커밋이 앞서 있을 수 있다. 생성물이 충돌하면 방금 만든
+            # 로컬본을 채택한다(리베이스 중에는 replay 되는 쪽이 'theirs').
+            rb = subprocess.run(["git", "rebase", "-X", "theirs", "origin/main"],
+                                cwd=HERE, capture_output=True, text=True, timeout=180)
+            if rb.returncode != 0:
+                subprocess.run(["git", "rebase", "--abort"], cwd=HERE, capture_output=True)
+                _restore_local()
+                return self._json({"ok": False, "error": "원격과 병합하지 못했습니다. 터미널에서 확인이 필요합니다.",
+                                   "log": (rb.stdout or "") + (rb.stderr or "")}, 409)
+
             _mark("GitHub 에 커밋 · push")
             subprocess.run(["git", "add", "-A"], cwd=HERE, capture_output=True)
             has = subprocess.run(["git", "diff", "--staged", "--quiet"], cwd=HERE).returncode != 0
