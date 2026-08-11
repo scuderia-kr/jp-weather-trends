@@ -47,17 +47,23 @@ UA = {
     "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
                    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"),
     "Accept-Language": "ja-JP,ja;q=0.9,en;q=0.8",
-    "Referer": "https://trends.google.co.jp/",
+    "Referer": "https://trends.google.com/",
 }
+
+# 쿠키(NID)는 반드시 .google.com 도메인으로 받아야 한다.
+# trends.google.co.jp 로 워밍업하면 NID 가 .google.co.jp 에만 붙어서,
+# 정작 API 를 부르는 trends.google.com 요청에는 쿠키가 하나도 실리지 않는다.
+# → 무조건 429. (2026-08-10 자동 갱신이 이 이유로 통째로 실패했다.)
+WARMUP = "https://trends.google.com/?geo=" + GEO
 
 
 def opener_with_cookies():
     jar = cookiejar.CookieJar()
     op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
     op.addheaders = list(UA.items())
-    op.open("https://trends.google.co.jp/trends/?geo=" + GEO, timeout=30).read(2048)
-    if not len(jar):
-        raise SystemExit("쿠키를 받지 못했습니다. 네트워크/차단 여부를 확인하세요.")
+    op.open(WARMUP, timeout=30).read(2048)
+    if not any(c.domain.endswith("google.com") for c in jar):
+        raise SystemExit("google.com 쿠키를 받지 못했습니다. 네트워크/차단 여부를 확인하세요.")
     return op
 
 
