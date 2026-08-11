@@ -67,8 +67,12 @@ git add -A data dashboard.html
 if git diff --staged --quiet; then
   say "바뀐 내용이 없습니다"
 else
+  # [skip ci] 를 붙이면 안 된다. 붙이는 순간 push 트리거가 죽어서 Pages 가
+  # 재배포되지 않고, 저장소만 최신이고 공개 페이지는 그대로인 상태가 된다.
+  # push 로 뜬 워크플로는 되커밋을 하지 않으므로(github.event_name != 'push')
+  # 무한 반복 걱정도 없다.
   git -c user.name=dashboard -c user.email=dashboard@local \
-      commit -q -m "데이터 갱신 $(date '+%Y-%m-%d') [skip ci]" || { restore_local; die "커밋 실패"; }
+      commit -q -m "데이터 갱신 $(date '+%Y-%m-%d')" || { restore_local; die "커밋 실패"; }
   say "커밋 완료"
 fi
 

@@ -264,7 +264,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             subprocess.run(["git", "add", "-A"], cwd=HERE, capture_output=True)
             has = subprocess.run(["git", "diff", "--staged", "--quiet"], cwd=HERE).returncode != 0
             if has:
-                msg = "데이터 갱신 " + date.today().isoformat() + " [skip ci]"
+                # [skip ci] 를 붙이면 push 트리거가 죽어서 Pages 가 재배포되지 않는다.
+                # 저장소만 최신이고 공개 페이지는 옛날 것인 상태가 되므로 붙이지 않는다.
+                # push 로 뜬 워크플로는 되커밋하지 않아 무한 반복은 생기지 않는다.
+                msg = "데이터 갱신 " + date.today().isoformat()
                 subprocess.run(["git", "-c", "user.name=dashboard",
                                 "-c", "user.email=dashboard@local",
                                 "commit", "-q", "-m", msg], cwd=HERE, capture_output=True)
