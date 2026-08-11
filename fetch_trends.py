@@ -33,6 +33,10 @@ HISTORY_START = "2024-01-01"   # 주간 장기 시계열 시작일
 DAILY_WINDOW = 90              # 월~일 집계용 일별 창
 # Google 할당량이 빡빡할 때 주간만 받고 싶으면 MUMUZ_SKIP_DAILY=1 로 실행
 SKIP_DAILY = os.environ.get("MUMUZ_SKIP_DAILY") == "1"
+# 이미 최신 주까지 받아 뒀으면 수집을 건너뛴다. MUMUZ_FORCE_TRENDS=1 이면 무조건 수집.
+# GitHub Actions 가 같은 월요일에 여러 번 재시도하는데, 한 번 성공한 뒤로는
+# 다시 부를 이유가 없다(부르면 괜히 할당량만 쓰고 429 를 부른다).
+FORCE = os.environ.get("MUMUZ_FORCE_TRENDS") == "1"
 TZ_MIN = -540                  # JST
 HL = "ja"
 
@@ -231,9 +235,30 @@ def write_monsun(master):
     return rows
 
 
+def latest_complete_week(end):
+    """end(어제) 기준으로 이미 끝난 마지막 주의 시작일(일요일). Google 버킷과 같은 기준."""
+    last_sat = end - timedelta(days=(end.weekday() - 5) % 7)   # Mon=0 … Sat=5
+    return last_sat - timedelta(days=6)
+
+
+def already_current(end):
+    """WEEKLY_CSV 에 마지막 완결 주가 complete=1 로 이미 들어 있으면 True."""
+    if not os.path.exists(WEEKLY_CSV):
+        return False
+    want = latest_complete_week(end).isoformat()
+    with open(WEEKLY_CSV, encoding="utf-8-sig") as f:
+        return any(r.get("week_start") == want and r.get("complete") == "1"
+                   for r in csv.DictReader(f))
+
+
 def main():
     today = date.today()
     end = today - timedelta(days=1)          # 어제까지 (당일은 미완결)
+    if not FORCE and already_current(end):
+        print("이미 %s 주까지 수집돼 있습니다 — 건너뜁니다."
+              % latest_complete_week(end).isoformat(), flush=True)
+        print("다시 받으려면 MUMUZ_FORCE_TRENDS=1 로 실행하세요.", flush=True)
+        return
     print("Google 트렌드 수집  geo=%s  키워드 %d개" % (GEO, len(KEYWORDS)), flush=True)
     op = opener_with_cookies()
     os.makedirs(RAW_DIR, exist_ok=True)

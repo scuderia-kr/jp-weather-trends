@@ -1,12 +1,21 @@
 name: 주간 갱신 + Pages 배포
 
-# 매주 월요일 05:00 UTC = 한국시간 월요일 14:00
+# 매주 월요일, 한국시간 14 / 18 / 22시 · 화요일 02 / 06시 — 하루에 5번 시도한다.
+# 구글 트렌드는 공식 API 가 없어 데이터센터 IP(=Actions 러너)를 자주 429 로 막는다.
+# 차단은 확률적이라 시간을 벌려 여러 번 두드리면 대개 한 번은 통과한다.
+# 한 번 성공해 그 주 데이터가 채워지면 fetch_trends.py 가 스스로 건너뛰므로
+# 남은 시도는 배포만 다시 하고 끝난다(구글 할당량을 더 쓰지 않는다).
 on:
   schedule:
-    - cron: "0 5 * * 1"
+    - cron: "0 5,9,13,17,21 * * 1"
   push:
     branches: [main]             # 코드를 고쳐 올리면 바로 재배포
-  workflow_dispatch: {}          # 수동 실행 버튼
+  workflow_dispatch:             # 수동 실행 버튼
+    inputs:
+      force_trends:
+        description: "이미 최신이어도 트렌드를 다시 수집"
+        type: boolean
+        default: false
 
 permissions:
   contents: write                # 갱신 데이터 커밋
@@ -30,6 +39,8 @@ jobs:
       - name: 트렌드 수집
         id: trends
         continue-on-error: true    # Google이 클라우드 IP를 자주 막는다 → 실패해도 계속
+        env:
+          MUMUZ_FORCE_TRENDS: ${{ inputs.force_trends && '1' || '' }}
         run: python3 fetch_trends.py
 
       - name: 계절 분석
@@ -78,7 +89,7 @@ jobs:
 
       - name: 트렌드 수집 실패 알림
         if: steps.trends.outcome == 'failure'
-        run: echo "::warning::트렌드 수집 실패(429 가능). 날씨·계절 분석은 갱신됨. 대시보드의 CSV 가져오기로 보완하세요."
+        run: echo "::warning::트렌드 수집 실패(429 가능). 날씨·계절 분석은 갱신됨. 몇 시간 뒤 예약된 재시도가 다시 받아 갑니다. 급하면 맥에서 run_weekly_push.sh 를 돌리세요."
 
       - name: 배포 파일 준비
         run: |
